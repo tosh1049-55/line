@@ -1,6 +1,6 @@
 cli.out sever.out: cli.c server.c communicates.c
+	gcc -pthread server.c bytes.c -o server.out
 	gcc -pthread bytes.c communicates.c -lncurses cli.c -o cli.out
-	gcc -pthread bytes.c server.c -o server.out
 
 clean:
 	rm *.out
