@@ -28,37 +28,38 @@ struct threads{
 	struct threads *next;
 };
 
-static struct threads *threads_front = NULL;
-
-int listen_socket(char *port);
-void *service(void *arg);
+static int listen_socket(char *port);
+static void *service(void *arg);
 //すでに自分と通信している人がいたとき
-int connect_user(struct threads *receiver_section, int sock);
+static int connect_user(struct threads *receiver_section, int sock);
 //ファイルに保存しておくとき
-int save_user(struct threads *section);
+static int save_user(struct threads *section);
 
 //transmitterからreceiverへのファイルパスをpathに入れる
-int path_create(char *receiver, char *transmitter, char *path){
+static int path_create(char *receiver, char *transmitter, char *path);
 //userとpassを認証する。もしユーザーが登録されていなければ、登録しておく。パスワードがあっていたら0,パスワードが間違っていたら-1を返す
-int user_check(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
+static int user_check(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
 //fdの指すファイルから、strと等しくなる行を調べる。見つかったら行の先頭から何行目かを返す。見つからなかったら、-1を返す。
-int select_line(FILE *fd, char *str);
+static int select_line(FILE *fd, char *str);
 //fdガサスファイルのline_num行目をlineに詰める。ただし、改行は含めない。成功したら、0失敗したら-1を返す。
-int take_line(FILE *fd, int line_num, char *line);
+static int take_line(FILE *fd, int line_num, char *line);
 /*threadsを新しく作り、receiver, transmitter, sockを詰めて、thread_frontに設定されている先頭を新しく作ったものにする。
 また、もとから設定されていたものはnextに詰める。成功したら構造体のポインタを,　失敗したらNULLを返す*/
-struct threads *threads_put(char *receiver, char *transmitter, int sock);
+static struct threads *threads_put(char *receiver, char *transmitter, int sock);
 //receiver, transmitterを満たすthreads型のデータをthreads_frontから探っっていく
-struct threads *threads_select(char *receiver, char *transmitter);
+static struct threads *threads_select(char *receiver, char *transmitter);
 //引数のソケットのピアソケットが閉じていないかチェック、成功したら0,　しっぱいしたら-1
-int sock_check(int sock);
+static int sock_check(int sock);
 //ファイルの内容をsockに代入する,成功したら0, 失敗したら-1
-int file2sock(FILE *fd, int sock);
-//int型をsizeof(int)個のchar型として記録する
-int int2str(int num, char *str);
-int str2int(char *str);
+static int file2sock(FILE *fd, int sock);
 //userとpassをファイルuser_fd, pass_fdに設定する
-int user_list(FILE *user_fd, FILE pass_fd, char *user, char *pass);
+static int user_list(FILE *user_fd, FILE *pass_fd, char *user, char *pass);
+
+//int型をsizeof(int)個のchar型として記録する
+extern int int2str(int num, char *str);
+extern int str2int(char *str);
+
+static struct threads *threads_front = NULL;
 
 int main(int argc, char *argv[]){
 	int i, server, sock;
@@ -101,7 +102,7 @@ int main(int argc, char *argv[]){
 	return 0;
 }
 
-void *service(void *arg){
+static void *service(void *arg){
 	int sock;
 	FILE *user_fd, *pass_fd;
 	char pass[NAME_MAX], receiver[NAME_MAX], transmitter[NAME_MAX], buf[NAME_MAX*2 + 3], *p, *r;
@@ -166,7 +167,7 @@ void *service(void *arg){
 	}
 }
 
-int connect_user(struct threads *receiver_section, int sock){
+static int connect_user(struct threads *receiver_section, int sock){
 	int receiver_sock;
 	char receiver[NAME_MAX], transmitter[NAME_MAX], receiver_path[NAME_MAX*2 + 12];
 	FILE *receiver_fd;
@@ -202,10 +203,11 @@ int connect_user(struct threads *receiver_section, int sock){
 	return 0;
 }
 
-int save_user(struct threads *section){
+static int save_user(struct threads *section){
 	int sock, receiver_sock;
 	char char_num[4], in[2048], *transmitter, *receiver, transmitter2receiver[NAME_MAX*2 + 12], receiver2transmitter[NAME_MAX*2 + 12];
 	FILE *to_transmitter, *to_receiver;
+	struct stat buf;
 
 	sock = section->sock;
 	strcpy(transmitter, section->transmitter);
@@ -218,7 +220,7 @@ int save_user(struct threads *section){
 	if((to_receiver = fopen(transmitter2receiver, "a+")) < 0)
 		return -1;
 
-	if(stat(receiver2transmitter, NULL) != -1){
+	if(stat(receiver2transmitter, &buf) != -1){
 		if((to_transmitter = fopen(receiver2transmitter, "r")) < 0)
 			return -1;
 		file2sock(to_transmitter, sock);
@@ -260,7 +262,7 @@ int save_user(struct threads *section){
 	return 0;
 }
 
-int path_create(char *receiver, char *transmitter, char *path){
+static int path_create(char *receiver, char *transmitter, char *path){
 	strcpy(path, "/usr/users/");
 	strcat(path, receiver);
 	strcat(path, "/");
@@ -271,14 +273,15 @@ int path_create(char *receiver, char *transmitter, char *path){
 
 	
 //userが登録されていなければ登録しておく
-int user_check(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
+static int user_check(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
 	int user_line;
 	char buf[NAME_MAX + 1];
 
 	user_line = select_line(user_fd, user);
 	if(user_line < 0)
 		user_list(user_fd, pass_fd, user, pass);
-	if(strcmp(pass, take_line(pass_fd, user_line, buf)) == 0)
+	take_line(pass_fd, user_line, buf);
+	if(strcmp(pass, buf) == 0)
 		return 0;
 	else
 		return -1;
@@ -286,7 +289,7 @@ int user_check(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
 
 
 //hostでipアドレスまたはドメインを指定 serviceでポート番号またはサービス名を指定
-int listen_socket(char *port){
+static int listen_socket(char *port){
 	int sock, err;
 	struct addrinfo hints, *res, *ai;
 
@@ -323,7 +326,7 @@ int listen_socket(char *port){
 	exit(1);
 }
 
-int select_line(FILE *fd, char *str){
+static int select_line(FILE *fd, char *str){
 	int count;
 	char buf[NAME_MAX + 1];
 
@@ -346,7 +349,7 @@ int select_line(FILE *fd, char *str){
 	return count; 
 }
 
-int take_line(FILE *fd, int line_num, char *line){
+static int take_line(FILE *fd, int line_num, char *line){
 	int i;
 	char buf[NAME_MAX + 1], *p;
 
@@ -363,7 +366,7 @@ int take_line(FILE *fd, int line_num, char *line){
 	return 0;
 }
 
-struct threads *threads_put(char *receiver, char *transmitter, int sock){
+static struct threads *threads_put(char *receiver, char *transmitter, int sock){
 	struct threads *new_thread;
 
 	if((new_thread = (struct threads *)malloc(sizeof(struct threads))) == NULL){
@@ -381,7 +384,7 @@ struct threads *threads_put(char *receiver, char *transmitter, int sock){
 	return new_thread;
 }
 
-struct threads *threads_select(char *receiver, char *transmitter){
+static struct threads *threads_select(char *receiver, char *transmitter){
 	struct threads *p;
 
 	for(p = threads_front;p != NULL;p = p->next){
@@ -393,7 +396,7 @@ struct threads *threads_select(char *receiver, char *transmitter){
 	return NULL;
 }
 
-int sock_check(int sock){
+static int sock_check(int sock){
 	struct pollfd fds[1];
 	
 	fds[0].fd = sock;
@@ -405,7 +408,7 @@ int sock_check(int sock){
 	return 0;
 }
 
-int file2sock(FILE *fd, int sock){
+static int file2sock(FILE *fd, int sock){
 	int i;
 	char c, buf[2048];
 	
@@ -430,7 +433,7 @@ int file2sock(FILE *fd, int sock){
 	return 0;
 }
 
-int user_list(FILE *user_fd, FILE pass_fd, char *user, char *pass){
+static int user_list(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
 	char name[NAME_MAX + 1];
 	fseek(user_fd, -1, SEEK_END);
 	fseek(pass_fd, -1, SEEK_END);
