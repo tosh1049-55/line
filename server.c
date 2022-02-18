@@ -42,6 +42,8 @@ int connect_user(struct threads *receiver_section, int sock);
 //ファイルに保存しておくとき
 int save_user(struct threads *section);
 
+struct threads *threads_back(struct threads *data);
+void server_exit(int sock, int receiver_sock, FILE *fd, char *transmitter, char *receiver);
 //transmitterからreceiverへのファイルパスをpathに入れる
 int path_create(char *receiver, char *transmitter, char *path);
 //userとpassを認証する。もしユーザーが登録されていなければ、登録しておく。パスワードがあっていたら0,パスワードが間違っていたら-1を返す
@@ -76,8 +78,8 @@ int main(int argc, char *argv[]){
 		exit(1);
 	}
 
-	user_fd = fopen("/etc/users", "w+");
-	pass_fd = fopen("/etc/pass", "w+");
+	user_fd = fopen("/etc/users", "r+");
+	pass_fd = fopen("/etc/pass", "r+");
 	
 	data.user_fd = user_fd;
 	data.pass_fd = pass_fd;
@@ -96,13 +98,60 @@ int main(int argc, char *argv[]){
 		}
 
 		data.sock = sock;
-		puts("service() を呼び出しました");
 		pthread_create(&t1, NULL, service, (void *)(&data));
 	}
 	close(sock);
 
 	return 0;
 }
+
+void server_exit(int sock, int receiver_sock, FILE *fd, char *transmitter, char *receiver){
+	struct threads *data, *p;
+
+	close(sock);
+	close(receiver_sock);
+	fclose(fd);
+
+	if(data = threads_select(transmitter, receiver)){
+		printf("receive:%s transmitter:%s from server_exit\n", transmitter, receiver);
+		p = threads_back(data);
+		if(p == data)
+			threads_front = NULL;
+		else if(p)
+			p->next = data->next;
+		free(data);
+		return;
+	}
+	if(data = threads_select(receiver, transmitter)){
+		printf("receive:%s transmitter:%s from server_exit\n", receiver, transmitter);
+		p = threads_back(data);
+		if(p == data)
+			threads_front = NULL;
+		else if(p)
+			p->next = data->next;
+		free(data);
+		return;
+	}
+}
+
+//When data is front, return is data;
+//When data was looked, return is back_data;
+//When data wasn't, return is NULL;
+struct threads *threads_back(struct threads *data){
+	int i;
+	struct threads *p, *r = data;
+
+	for(p = threads_front;p != data;p = p->next){
+		if(p == NULL){
+			r = NULL;
+			break;
+		}
+			
+		r = p;
+	}
+	return r;
+}
+
 
 void *service(void *arg){
 	int sock;
@@ -115,7 +164,7 @@ void *service(void *arg){
 	user_fd = data->user_fd;
 	pass_fd = data->pass_fd;
 
-
+	puts("ユーザー認証を開始します");
 	while(1){	//認証。ユーザーが見つからなかったら作る
 		char char_num[4];
 		int num;
@@ -123,9 +172,11 @@ void *service(void *arg){
 		read(sock, char_num, sizeof(int));
 		num = str2int(char_num);
 		read(sock, buf, num);
-		p = strchr(buf, '\n');
-		if(p)
-			*p++ = '\0';
+		if((p = strchr(buf, '\n')) == NULL){
+			fputs("cli stail err\n", stderr);
+			exit(1);
+		}
+		*p++ = '\0';
 		strcpy(transmitter, buf);
 		strcpy(pass, p);
 		if(user_check(user_fd, pass_fd, transmitter, pass) < 0)
@@ -137,12 +188,11 @@ void *service(void *arg){
 
 		if(sock_check(sock) == 1){
 			fputs("sock is close\n", stderr);
-			exit(1);
+			pthread_exit(NULL);
 		}
 	}
+	puts("ユーザー認証に成功しました。通信相手を探します。通信相手は");
 
-	puts("認証に成功しました");
-	
 	while(1){	//通信相手を探す。いなかったらOK,いたらNOを送る
 		char char_num[4];
 		int num;
@@ -151,6 +201,7 @@ void *service(void *arg){
 		num = str2int(char_num);
 		read(sock, buf, num);
 		strcpy(receiver, buf);
+		puts(receiver);
 		if(select_line(user_fd, receiver) < 0)
 			write(sock, "NO", 3);
 		else{
@@ -160,14 +211,14 @@ void *service(void *arg){
 
 		if(sock_check(sock) == 1){
 			fputs("sock is closed\n", stderr);
-			exit(1);
+			pthread_exit(NULL);
 		}
 	}
-	
-	puts("相手を見つけました");
 
+	puts("通信がすでにされているかチェックします");
 	//すでに相手が自分と通信しているかチェックする
 	if((partner = threads_select(transmitter, receiver))){
+		puts("ユーザをつなげます");
 		connect_user(partner, sock);
 	}else{	//いなかった場合
 		struct threads *data;
@@ -176,6 +227,7 @@ void *service(void *arg){
 			fprintf(stderr, "put_threads: err\n");
 			exit(1);
 		}
+		puts("ファイルに保存します");
 		save_user(data);
 	}
 }
@@ -204,12 +256,16 @@ int connect_user(struct threads *receiver_section, int sock){
 		int num;
 		char char_num[4], in[2048];
 
-		if(sock_check(sock) == 1)	//sockが閉じていれば終了
-			break;
+		if(sock_check(sock) == 1 || sock_check(receiver_sock) == 1){	//sockが閉じていれば終了
+			server_exit(sock, receiver_sock, receiver_fd, transmitter, receiver);
+			pthread_exit(NULL);
+		}
 		//相手のメッセージをこちらに書き込む
 		read(receiver_sock, char_num, sizeof(int));
 		num = str2int(char_num);
 		read(receiver_sock, in, num);
+		printf("from %s to %s: %s\n", receiver, transmitter, in);
+		write(sock, char_num, sizeof(4));
 		write(sock, in, num);
 	}
 
@@ -218,7 +274,7 @@ int connect_user(struct threads *receiver_section, int sock){
 
 int save_user(struct threads *section){
 	int sock, receiver_sock;
-	char char_num[4], in[2048], *transmitter, *receiver, transmitter2receiver[NAME_MAX*2 + 12], receiver2transmitter[NAME_MAX*2 + 12];
+	char char_num[4], in[2048], transmitter[NAME_MAX], receiver[NAME_MAX], transmitter2receiver[NAME_MAX*2 + 12], receiver2transmitter[NAME_MAX*2 + 12];
 	FILE *to_transmitter, *to_receiver;
 	struct stat buf;
 
@@ -226,16 +282,23 @@ int save_user(struct threads *section){
 	strcpy(transmitter, section->transmitter);
 	strcpy(receiver, section->receiver);
 
+	printf("相手は%s. from save_user\n", receiver);
+	printf("ユーザは%s. from save_user\n", transmitter);
+
 	path_create(receiver, transmitter, transmitter2receiver);
 	path_create(transmitter, receiver, receiver2transmitter);
 
-	strcat(transmitter2receiver, transmitter);
+	printf("相手へのメッセージを記録しておくファイル名は%sです\n", transmitter2receiver);
+	printf("相手からのメセージが記録してあるファイル名は%sです\n", receiver2transmitter);
+
+	puts("チャット保存用のファイルを開きます");
 	if((to_receiver = fopen(transmitter2receiver, "a+")) < 0)
 		return -1;
 
 	if(stat(receiver2transmitter, &buf) != -1){
 		if((to_transmitter = fopen(receiver2transmitter, "r")) < 0)
 			return -1;
+		puts("これから、溜まっていたメッセージを送信します");
 		file2sock(to_transmitter, sock);
 
 		fclose(to_transmitter);
@@ -256,19 +319,31 @@ int save_user(struct threads *section){
 		read(sock, nums, sizeof(int));
 		char_num = str2int(nums);
 		read(sock, in, char_num);
+		if(sock_check(sock) == 1){	//sockが閉じていれば終了
+			puts("sock is closed");
+			server_exit(sock, receiver_sock, to_receiver, transmitter, receiver);
+			pthread_exit(NULL);
+		}
+		printf("%s :を書き込みます\n", in);
 		fprintf(to_receiver, "%s\n\n", in);
 	}
 
+	puts("これからつなげます from save_file");
 	while(1){
 		int num;
 		char char_num[4], in[2048];
 
-		if(sock_check(sock) == 1)	//sockが閉じていれば終了
-			break;
+		if(sock_check(sock) == 1 || sock_check(receiver_sock)){	//sockが閉じていれば終了
+			fputs("sock is closed\n", stderr);		
+			server_exit(sock, receiver_sock, to_receiver, transmitter, receiver);
+			pthread_exit(NULL);
+		}
 		//receiver_sockのメッセージをsockに書き込む
 		read(receiver_sock, char_num, sizeof(int));
 		num = str2int(char_num);
 		read(receiver_sock, in, num);
+		printf("from %s to %s: %s\n", receiver, transmitter, in);
+		write(sock, char_num, sizeof(4));
 		write(sock, in, num);
 	}
 
@@ -276,6 +351,8 @@ int save_user(struct threads *section){
 }
 
 int path_create(char *receiver, char *transmitter, char *path){
+	printf("受け取る側の名前は%s from path_create\n", receiver);
+	printf("送る側の名前は%s from path_create\n", transmitter);
 	strcpy(path, "/usr/users/");
 	strcat(path, receiver);
 	strcat(path, "/");
@@ -290,13 +367,17 @@ int user_check(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
 	int user_line;
 	char buf[NAME_MAX + 1];
 
+	puts("認証に入ります");
 	user_line = select_line(user_fd, user);
-	if(user_line < 0)
+	if(user_line < 0){
+		puts("ユーザを作成します");
 		user_list(user_fd, pass_fd, user, pass);
-	else{
+	}else{
+		printf("パスワードの認証をします.パスワードは%s,調べる位置は%d\n", pass, user_line);
 		take_line(pass_fd, user_line, buf);
 		if(strcmp(pass, buf) != 0)
 			return -1;
+		puts("パスワードの認証に成功しました");
 	}
 
 	return 0;
@@ -343,22 +424,24 @@ int listen_socket(char *port){
 
 int select_line(FILE *fd, char *str){
 	int count;
-	char buf[NAME_MAX + 1];
+	char buf[NAME_MAX + 2];
 
 	fseek(fd, 0, SEEK_SET);
 	for(count = 0;;count++){
 		char *buf_return, *buf_turn;
 		
 		buf_return = fgets(buf, sizeof buf, fd);
-		buf_turn = strchr(buf, '\n');
-		if(buf_turn)
-			*(buf_turn) = '\0';
-		if(strcmp(buf, str) == 0)
-			break;
 		if(buf_return == NULL){
 			count = -1;
 			break;
 		}
+
+		buf_turn = strchr(buf, '\n');
+		if(buf_turn)
+			*(buf_turn) = '\0';
+		puts(buf);
+		if(strcmp(buf, str) == 0)
+			break;
 	}
 
 	return count; 
@@ -375,7 +458,8 @@ int take_line(FILE *fd, int line_num, char *line){
 	}
 	
 	p = strchr(buf, '\n');
-	*p = '\0';
+	if(p)
+		*p = '\0';
 	strcpy(line, buf);
 	
 	return 0;
@@ -425,39 +509,44 @@ int sock_check(int sock){
 
 int file2sock(FILE *fd, int sock){
 	int i;
-	char c, buf[2048];
+	char buf[2048];
 	
 	fseek(fd, 0, SEEK_SET);
+	puts("ファイルの送信を開始します");
 	for(i=0;;i++){
-		c = fgetc(fd);
-		if(c == EOF)
+		int num;
+		num = fgetc(fd);
+		if(num == EOF)
 			break;
-		buf[i] = c;
-		if(c == '.'){
+		buf[i] = (char)num;
+		if(num == '.'){
 			char buf_int[4];
 			
-			int2str(i+1, buf_int);
+			buf[i+1] = '\0';
+			int2str(i+2, buf_int);
 			write(sock, buf_int, sizeof(int));
-			write(sock, buf, i+1);
+			printf("%s: を書き込みます\n", buf);
+			write(sock, buf, i+2);
 			fgetc(fd);fgetc(fd);
 			i = -1;
 			continue;
 		}
 	}
+	puts("ファイルの送信が完了しました");
 
 	return 0;
 }
 
 int user_list(FILE *user_fd, FILE *pass_fd, char *user, char *pass){
-	char name[NAME_MAX + 1];
+	char name[NAME_MAX + 5];
 	
-	fseek(user_fd, -1, SEEK_END);
-	fseek(pass_fd, -1, SEEK_END);
+	fseek(user_fd, 0, SEEK_END);
+	fseek(pass_fd, 0, SEEK_END);
 
-	fputs(user, user_fd);
-	fputs(pass, pass_fd);
+	fprintf(user_fd, "%s\n", user);
+	fprintf(pass_fd, "%s\n", pass);
 
-	strcpy(name, "/usr/");
+	strcpy(name, "/usr/users/");
 	strcat(name, user);
 	mkdir(name, 744);
 
