@@ -4,18 +4,18 @@ int int2str(int num, char *str){
 		int buf;
 
 		buf = num;
-		buf >> 8*i;
-		buf &= 255;
+		buf >>= (8*i);
+		buf &= 0xff;
 		str[i] = (char)buf;
 	}
 	return 0;
 }
 
 int str2int(char *str){
-	int i, num;
+	int i, num = 0;
 
 	for(i=0;i<sizeof(int);i++)
-		num += (str[i] << 8*i);
+		num += (str[i] << (8*i));
 
 	return num;
 }

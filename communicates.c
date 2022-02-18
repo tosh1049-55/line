@@ -22,7 +22,7 @@
 void *input(void *arg);
 void *output(void *arg);
 int message_put(int *poses, char *name, char *message);
-int put_control_init();
+int put_control_init(char *path);
 int put_control_end();
 int put_control_put(char *name, char *str);
 int put_control_pull_change();
@@ -59,7 +59,7 @@ void sigint_hand(int sig){
 	exit(0);
 }
 
-int message(int sock, int who){
+int message(int sock, char *path){
 	pthread_t in_t, out_t;
 	struct sigaction act;
 	void *res;
@@ -69,7 +69,7 @@ int message(int sock, int who){
 	act.sa_handler = sigint_hand;
 	puts("チャットを開始します");
 	sigaction(SIGINT, &act, NULL);
-	put_control_init(who);
+	put_control_init(path);
 	getmaxyx(stdscr, y, x);
 	y -= (MESSAGE_MAX_LINE + 1);
 	pos[0] = y;
@@ -114,11 +114,14 @@ void *output(void *arg){
 }
 
 void *input(void *arg){
-	int sock = *(int *)arg, nfds, point, sock_size;
+	int sock = *(int *)arg, nfds, point;
 	char in[1024];
 	struct pollfd fds[1];
 
 	for(;;){
+		char char_num[4];
+		int num;
+
 		fds[0].fd = sock;
 		fds[0].events = POLLRDHUP;
 		nfds = poll(fds, 1, 0);
@@ -131,9 +134,9 @@ void *input(void *arg){
 			return NULL;
 		}
 
-		read(sock, in, sizeof(int));
-		sock_size = str2int(in);
-		read(sock, in, sock_size);
+		read(sock, char_num, sizeof(int));
+		num = str2int(char_num);
+		read(sock, in, num);
 
 		put_control_put("guest", in);
 		put_control_pull_change();
@@ -142,10 +145,23 @@ void *input(void *arg){
 }
 
 //失敗したら-1を返す.who == 0でsever who == 1でcli
-int put_control_init(int who){
+int put_control_init(char *path){
 	FILE *in_fd, *out_fd;
 	int char_num;
 	
+	printf("%sのファイrを作成します from put_control_init\n", path);
+	out_fd = fopen(path, "a");
+	in_fd = fopen(path, "r");
+
+	if(in_fd < 0){
+		fputs("in_fd open err\n", stderr);
+		return -1;
+	}
+	if(out_fd < 0){
+		fputs("out_fd open err\n", stderr);
+		return -1;
+	}
+
 	initscr();
 	start_color();
 	keypad(stdscr, TRUE);
@@ -155,28 +171,12 @@ int put_control_init(int who){
 	init_pair(COLOR_KEY, COLOR_BLACK, COLOR_WHITE);
 	bkgd(COLOR_PAIR(COLOR_MESSAGE));
 	attrset(COLOR_PAIR(COLOR_KEY));
-	if(who == 0){
-		out_fd = fopen("message_server", "a");
-		in_fd = fopen("message_server", "r");
-	}else{
-		out_fd = fopen("message_cli", "a");
-		in_fd = fopen("message_cli", "r");
-	}
-		
-	if(in_fd < 0){
-		fputs("in_fd open err\n", stderr);
-		return -1;
-	}
-	if(out_fd < 0){
-		fputs("out_fd open err\n", stderr);
-		return -1;
-	}
+	
 	pthread_mutex_lock(&mtx_control);
 	control_date.file_front = line_check(in_fd, &char_num, control_date.line_long);
 	control_date.in_fd = in_fd;
 	control_date.out_fd = out_fd;
 	fseek(control_date.in_fd, char_num, SEEK_SET);
-	fseek(control_date.out_fd, -1, SEEK_END);
 	control_date.pos_tail = 0;
 	fseek(control_date.in_fd, char_num, SEEK_SET);
 
@@ -197,12 +197,6 @@ int put_control_end(){
 	pthread_mutex_unlock(&mtx_control);
 
 	endwin();
-
-	//unlink("message_cli");
-	//unlink("message_sever");
-
-	for(i = 0;i<10;i++)
-		printf("%ld\n", control_date.line_long[i]);
 
 	return 0;
 }
@@ -464,5 +458,6 @@ int line_check(FILE *fd, int *char_num, long *line_long){
 	}while(buf != EOF);
 
 	*char_num = lang_num-1;
+
 	return line_num;
 }

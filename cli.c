@@ -11,7 +11,7 @@
 
 #define NAME_MAX 128
 
-int message(int sock, int who);
+int message(int sock, char *path);
 void *output(void *arg);
 void *input(void *arg);
 int open_fd(int fd, FILE **finp, FILE **fintp);
@@ -20,6 +20,7 @@ int conection(char *host, char *service);
 int str2int(char *str);
 int int2str(int num, char *str);
 
+int path_create(char *receiver, char *path);
 //user\npassを送信して、認証に成功したら0,失敗したら-1を返す
 int user_check(char *user, char *pass, int sock);
 //userを送信して、認証に成功したら0,失敗したら-1を返す
@@ -33,9 +34,11 @@ int create_user(char *user, char *pass);
 //:/usr/userからuserとpassをと取り出す
 int select_user(char *user, char *pass);
 
+FILE *file_open(char *receiver);
+
 int main(int argc, char *argv[]){
 	int sock;
-	char user[NAME_MAX], pass[NAME_MAX], partner[NAME_MAX];
+	char user[NAME_MAX], pass[NAME_MAX], partner[NAME_MAX], path[NAME_MAX + 10];
 	struct stat buf;
 	FILE *in, *out;
 	
@@ -65,15 +68,28 @@ int main(int argc, char *argv[]){
 	
 	puts("通信する相手を選択したください");
 	fgets(partner, sizeof partner, stdin);
+	*strchr(partner, '\n') = '\0';
 	if(select_partner(partner, sock) < 0){
 		puts("相手が登録していません");
 		exit(1);
 	}
 
-	message(sock, 1);
+	puts("pathを作ります");
+	path_create(partner, path);
+	printf("%sが作られました\n", path);
+
+	message(sock, path);
 
 	exit(0);
 }
+
+int path_create(char *receiver, char *path){
+	strcpy(path, "/usr/message/");
+	strcat(path, receiver);
+
+	return 0;
+}
+
 
 //finpがfdの読み込み専用のやつ。fintpは書き込み専用のやつ
 int open_fd(int fd, FILE **finp, FILE **fintp){
@@ -134,6 +150,7 @@ int user_check(char *user, char *pass, int sock){
 	strcat(buf, "\n");
 	strcat(buf, pass);
 	num = str_size(buf);
+	printf("%d\n", num);
 	int2str(num, char_num);
 	write(sock, char_num, sizeof(int));
 	write(sock, buf, num);

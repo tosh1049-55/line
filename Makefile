@@ -1,11 +1,10 @@
-cli.out sever.out: cli.c server.c communicates.c
+cli.out sever.out: bytes.c cli.c server.c communicates.c
 	gcc -pthread server.c bytes.c -o server.out
 	gcc -pthread bytes.c communicates.c -lncurses cli.c -o cli.out
 
 clean:
 	rm *.out
-	rm message_server
-	rm message_cli
+	sudo rm -i /usr/message/*
 
 cli_run:
 	./cli.out localhost 100

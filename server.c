@@ -115,7 +115,6 @@ void *service(void *arg){
 	user_fd = data->user_fd;
 	pass_fd = data->pass_fd;
 
-	puts("認証を開始します");
 
 	while(1){	//認証。ユーザーが見つからなかったら作る
 		char char_num[4];
@@ -125,7 +124,8 @@ void *service(void *arg){
 		num = str2int(char_num);
 		read(sock, buf, num);
 		p = strchr(buf, '\n');
-		*p++ = '\0';
+		if(p)
+			*p++ = '\0';
 		strcpy(transmitter, buf);
 		strcpy(pass, p);
 		if(user_check(user_fd, pass_fd, transmitter, pass) < 0)
